@@ -8,11 +8,13 @@
 #include <twg/twg.h>
 #include <twg/window/window_ctrl.h>
 #include <twg/ctrl/clickable_ctrl.h>
+#include <twg/ctrl/brain.h>
 #include <twg/ctrl/menu.h>
 #include <twg/image/image_drawing.h>
 
 using namespace twg;
 
+//-----------------------------------------------------------------------------
 class WordGetter;
 class RandomWord;
 class WorstWord;
@@ -49,80 +51,85 @@ public:
 
 	/** Рисует некоторые данные на экран. */
 	virtual void draw(ImageBase* buffer) = 0;
+
+	/** Означает, что текущее слово надо бы хорошо заучить. */
+	virtual void needToLearn(void) = 0;
 };
 
 //-----------------------------------------------------------------------------
-class RandomWord : public WordGetter
+struct CommonStatisticData
+{
+	CommonStatisticData();
+	~CommonStatisticData();
+
+	bool						isLeft;
+
+	std::vector<std::wstring>	left;
+	std::vector<std::wstring>	right;
+	std::vector<int32>			statLeft;
+	std::vector<int32>			statRight;
+
+	int32u 						answerPos;
+	int32u						correct;
+	int32u						incorrect;
+	int32u						number;
+	int32u						neutral;
+	int32u						minus;
+	int32u						plus;
+
+	void countStat(void);
+	void swapLanguage(void);
+
+	const std::wstring filename = L"words.txt";
+	const std::wstring file1 = L"words_1.txt";
+	const std::wstring file2 = L"words_2.txt";
+};
+
+//-----------------------------------------------------------------------------
+class StatisticGetter : public WordGetter
 {
 public:
-	RandomWord();
-	~RandomWord();
+	StatisticGetter(CommonStatisticData& m);
+	virtual ~StatisticGetter();
+	virtual int32u getQuestionPos(void) = 0;
+	virtual void afterSwap(void) = 0;
 
-	void getQuestion(std::wstring& question, std::vector<std::wstring>& answers, int32u answersNum);
+	//-------------------------------------------------------------------------
+	void getQuestion(std::wstring& question, 
+					 std::vector<std::wstring>& answers, 
+					 int32u answersNum);
 	bool answer(int8u answerNo, int8u& correctAnswer);
 	void swapLanguage(void);
+	void needToLearn(void);
+protected:
+	CommonStatisticData& 	m;
+};
+
+//-----------------------------------------------------------------------------
+class RandomWord : public StatisticGetter
+{
+public:
+	RandomWord(CommonStatisticData& m) : StatisticGetter(m) {}
+
+	int32u getQuestionPos(void);
+	void afterSwap(void);
+	void draw(ImageBase* buffer);
+};
+
+//-----------------------------------------------------------------------------
+class WorstWord : public StatisticGetter
+{
+public:
+	WorstWord(CommonStatisticData& m);
+	int32u getQuestionPos(void);
+	void afterSwap(void);
 	void draw(ImageBase* buffer);
 private:
-	std::vector<std::wstring>	m_left;
-	std::vector<std::wstring>	m_right;
-	int32u 						m_answerPos;
-	int32u						m_correct;
-	int32u						m_incorrect;
-};
-
-//-----------------------------------------------------------------------------
-class WorstWord : public WordGetter
-{
-public:
-	WorstWord();
-	~WorstWord();
-
-	void getQuestion(std::wstring& question, std::vector<std::wstring>& answers, int32u answersNum);
-	bool answer(int8u answerNo, int8u& correctAnswer);
-	void swapLanguage(void);
-	void draw(ImageBase* buffer);
-
 	void makePushMas(void);
 	void push(int32 no);
-private:
-	std::vector<std::wstring>	m_left;
-	std::vector<std::wstring>	m_right;
-	int32u 						m_answerPos;
-	int32u						m_correct;
-	int32u						m_incorrect;
-	int32u						m_number;
-	int32u						m_neutral;
-	int32u						m_minus;
-	int32u						m_plus;
-	std::vector<int32>			m_statLeft;
-	std::vector<int32>			m_statRight;
+
 	std::vector<int32u>			m_pushMas;
-	bool						m_isLeft;
 };
-
-// //-----------------------------------------------------------------------------
-// class RandomAllWord : public WordGetter
-// {
-// public:
-// 	RandomAllWord(std::string filename);
-// 	~RandomAllWord();
-
-// 	void getQuestion(std::string& question, std::vector<std::string> answers);
-// 	bool answer(int8u answerNo);
-// 	void setQuestionLanguage(bool isLeft);
-// };
-
-// //-----------------------------------------------------------------------------
-// class ConsistentAllWord : public WordGetter
-// {
-// public:
-// 	ConsistentAllWord(std::string filename);
-// 	~ConsistentAllWord();
-
-// 	void getQuestion(std::string& question, std::vector<std::string> answers);
-// 	bool answer(int8u answerNo);
-// 	void setQuestionLanguage(bool isLeft);
-// };
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
@@ -191,24 +198,17 @@ private:
 
 //-----------------------------------------------------------------------------
 /** Основные мозги программы. Получает все сообщения, обрабатывает их. */
-class MainHandler : public CtrlBase
+class MainHandler : public BrainCtrl
 {
 public:
-	MainHandler(EventsBase* parent) : 
-		CtrlBase(parent),
-		m_buttonsCount(4),
-		m_getter(0),
-		m_isInited(false) {
-		WindowCtrl** wnd = (WindowCtrl**)sendMessageUp(WINDOW_GET_POINTER, nullptr);
-		m_wnd = *wnd;
-		delete wnd;	
-	}
+	MainHandler(EventsBase* parent);
 	~MainHandler();
-	bool onMessage(int32u messageNo, void* data);
+
+	//-------------------------------------------------------------------------
+	void init(void);
+	bool onMessageNext(int32u messageNo, void* data);
 	bool onResize(Rect rect, SizingType type);
 	void draw(ImageBase* buffer);
-
-	void makeButtons(int32u count);
 private:
 	int32u							m_buttonsCount;
 	std::vector<WrongRightButton*>	m_buttons;
@@ -217,8 +217,9 @@ private:
 	int32u							m_getter;
 	std::wstring					m_question;
 	std::vector<std::wstring>		m_answers;
-	WindowCtrl*						m_wnd;
-	bool							m_isInited;
+	CommonStatisticData				m_data;
+
+	void makeButtons(int32u count);
 };
 
 //=============================================================================
@@ -226,67 +227,248 @@ private:
 //=============================================================================
 
 //-----------------------------------------------------------------------------
-RandomWord::RandomWord() :  
-	m_answerPos(0),
-	m_correct(0),
-	m_incorrect(0) {
-	m_left.reserve(10000);
-	m_right.reserve(10000);
+CommonStatisticData::CommonStatisticData() : 
+	answerPos(0),
+	correct(0),
+	incorrect(0),
+	neutral(0),
+	plus(0),
+	minus(0),
+	isLeft(true) {
 
+	// Read words file
 	std::wifstream wfin;
-	wfin.open("words.txt", std::ios_base::in);
-	wchar_t line[500] = {};
+	wfin.open(filename, std::ios_base::in);
+	wchar_t buffer[500] = {};
 
 	while (!wfin.eof()) {
-		wfin.getline(line, 500);
-		std::wstring word(line);
+		wfin.getline(buffer, 500);
+		std::wstring word(buffer);
 		
 		size_t pos = word.find('\t');
-		std::wstring left = word.substr(0, pos);
-		std::wstring right = word.substr(pos + 1, word.size() - pos - 1);
+		std::wstring rleft = word.substr(0, pos);
+		std::wstring rright = word.substr(pos + 1, word.size() - pos - 1);
 
-		m_left.push_back(left);
-		m_right.push_back(right);
+		left.push_back(rleft);
+		right.push_back(rright);
 	}
 
 	wfin.close();
+
+	// See for too low words
+	if (left.size() < 15) 
+		messageBox(L"Too few words", L"In file " + filename + L" you have less than 15 words. Program will only work when there are 15 words or more.", MESSAGE_OK);
+
+	// Read first statistic file
+	wfin.open(file1, std::ios_base::in);
+	int32u count = 0;
+	int32 stat;
+
+	while (!wfin.eof()) {
+		wfin >> stat;
+		statLeft.push_back(stat);
+	}
+
+	wfin.close();
+
+	// Read second statistic file
+	wfin.open(file2, std::ios_base::in);
+	count = 0;
+
+	while (!wfin.eof()) {
+		wfin >> stat;
+		statRight.push_back(stat);
+	}
+
+	wfin.close();
+
+	// Align the size of statistic arrays
+	while (statLeft.size() < left.size())
+		statLeft.push_back(0);
+
+	while (statRight.size() < right.size())
+		statRight.push_back(0);
+
+	if (statLeft.size() > left.size()) {
+		statLeft.erase(statLeft.begin() + left.size(), statLeft.end());
+		statRight.erase(statRight.begin() + right.size(), statRight.end());
+	}
+
+	countStat();
 }
 
 //-----------------------------------------------------------------------------
-RandomWord::~RandomWord() {
-	m_answerPos = 0;
+CommonStatisticData::~CommonStatisticData() {
+	if (!isLeft)
+		swapLanguage();
+
+	// Save first statistic file
+	std::wofstream fout;
+	fout.open(file1, std::ios_base::out);
+
+	for (int i = 0; i < statLeft.size(); ++i) {
+		fout << statLeft[i] << L" ";
+	}
+
+	fout.close();
+
+	// Save second statistic file
+	fout.open(file2, std::ios_base::out);
+
+	for (int i = 0; i < statRight.size(); ++i) {
+		fout << statRight[i] << L" ";
+	}
+
+	fout.close();
 }
 
 //-----------------------------------------------------------------------------
-void RandomWord::getQuestion(std::wstring& question, std::vector<std::wstring>& answers, int32u answersNum) {
-	answers.erase(answers.begin(), answers.end());
-
-	int32u number = std::rand() * m_left.size() / RAND_MAX;
-	m_answerPos = std::rand() * answersNum / RAND_MAX;
-
-	question = m_left[number];
-	for (int i = 0; i < answersNum; ++i) {
-		if (i == m_answerPos)
-			answers.push_back(m_right[number]);
+void CommonStatisticData::countStat() {
+	// Count types of words
+	neutral = 0;
+	minus = 0;
+	plus = 0;
+	for (int i = 0; i < statLeft.size(); ++i) {
+		if (statLeft[i] == 0)
+			neutral++;
 		else
-			answers.push_back(m_right[std::rand() * m_right.size() / RAND_MAX]);
+			if (statLeft[i] < 0)
+				minus++;
+			else
+				if (statLeft[i] > 0)
+					plus++;
 	}
 }
 
 //-----------------------------------------------------------------------------
-bool RandomWord::answer(int8u answerNo, int8u& correntAnswer) {
-	correntAnswer = m_answerPos;
-	bool returned = answerNo == m_answerPos;
+void CommonStatisticData::swapLanguage(void) {
+	isLeft = !isLeft;
+	swap(left, right);
+	swap(statLeft, statRight);
+
+	countStat();
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+StatisticGetter::StatisticGetter(CommonStatisticData& m) : m(m) {
+}
+
+//-----------------------------------------------------------------------------
+StatisticGetter::~StatisticGetter() {
+}
+
+//-----------------------------------------------------------------------------
+void StatisticGetter::getQuestion(std::wstring& question, 
+								  std::vector<std::wstring>& answers, 
+								  int32u answersNum) {
+	std::vector<int32u> answersPos;
+
+	answers.erase(answers.begin(), answers.end());
+
+	m.number = getQuestionPos();
+	m.answerPos = std::rand() * answersNum / RAND_MAX;
+
+	question = m.left[m.number];
+
+	// Generate wrong answers without intersections
+	for (int i = 0; i < answersNum; ++i) {
+		if (i == m.answerPos)
+			answersPos.push_back(m.number);
+		else {
+			newGeneration:
+			int32u wrongPos = std::rand() * m.right.size() / RAND_MAX;
+
+			if (wrongPos == m.answerPos)
+				goto newGeneration;
+			for (int i = 0; i < answersPos.size(); ++i)
+				if (wrongPos == answersPos[i])
+					goto newGeneration;
+
+			answersPos.push_back(wrongPos);
+		}
+	}
+
+	for (int i = 0; i < answersPos.size(); ++i)
+		answers.push_back(m.right[answersPos[i]]);
+}
+
+//-----------------------------------------------------------------------------
+bool StatisticGetter::answer(int8u answerNo, int8u& correntAnswer) {
+	correntAnswer = m.answerPos;
+	bool returned = answerNo == m.answerPos;
 	if (returned)
-		m_correct++;
+		m.correct++;
 	else
-		m_incorrect++;
+		m.incorrect++;
+
+	if (returned)
+		if (m.statLeft[m.number] == 0) {
+			m.statLeft[m.number] = 1;
+			m.neutral--;
+			m.plus++;
+		} else
+			if (m.statLeft[m.number] < 0) {
+				m.statLeft[m.number]++;
+
+				if (m.statLeft[m.number] == 0) {
+					m.statLeft[m.number]++;
+					m.minus--;
+					m.plus++;
+				}
+			} else
+				m.statLeft[m.number]++;
+	else
+		if (m.statLeft[m.number] == 0) {
+			m.statLeft[m.number] = -1;
+			m.neutral--;
+			m.minus++;
+		} else
+			if (m.statLeft[m.number] > 0) {
+				m.statLeft[m.number] = -1;
+				m.plus--;
+				m.minus++;
+			} else
+				m.statLeft[m.number]--;
+
 	return returned;
 }
 
 //-----------------------------------------------------------------------------
-void RandomWord::swapLanguage(void) {
-	swap(m_left, m_right);
+void StatisticGetter::swapLanguage(void) {
+	m.swapLanguage();
+	
+	afterSwap();
+}
+
+void StatisticGetter::needToLearn(void) {
+	if (m.statLeft[m.number] > -5) {
+		if (m.statLeft[m.number] == 0) {
+			m.neutral--;
+			m.minus++;
+		}
+		if (m.statLeft[m.number] > 0) {
+			m.plus--;
+			m.minus++;
+		}
+		m.statLeft[m.number] = -5;
+	}
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+int32u RandomWord::getQuestionPos(void) {
+	return std::rand() * m.left.size() / RAND_MAX;
+}
+
+//-----------------------------------------------------------------------------
+void RandomWord::afterSwap(void) {
 }
 
 //-----------------------------------------------------------------------------
@@ -297,16 +479,24 @@ void RandomWord::draw(ImageBase* buffer) {
 	std::wstringstream sout;
 	img.setTextStyle(TextStyle(14, L"Consolas", TEXT_NONE));
 
-	sout << L"Correct answers: " << m_correct;
+	sout << L"Correct answers: " << m.correct;
 	Point_i pos(Point_i(13, 15));
 	img.setPen(Pen(1, getColorBetween(0.2, Green, Black)));
 	img.drawText(pos, sout.str());
 
 	pos.y += img.getTextSize(sout.str()).y;
 	std::wstringstream sout2;
-	sout2 << L"Incorrect answers: " << m_incorrect;
+	sout2 << L"Incorrect answers: " << m.incorrect;
 	img.setPen(Pen(1, getColorBetween(0.2, Red, Black)));
 	img.drawText(pos, sout2.str());
+
+	pos.y += img.getTextSize(sout.str()).y;
+	std::wstringstream sout3;
+	sout3 << L"Unexplored words: " << m.neutral << std::endl
+		  << L"Mistakes: " << m.minus << std::endl
+		  << L"Correct answers: " << m.plus << std::endl;
+	img.setPen(Pen(1, getGrayHue(0.9)));
+	img.drawText(pos, sout3.str());
 }
 
 //-----------------------------------------------------------------------------
@@ -314,196 +504,23 @@ void RandomWord::draw(ImageBase* buffer) {
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-WorstWord::WorstWord() : 
-	m_answerPos(0),
-	m_correct(0),
-	m_incorrect(0) {
-	m_isLeft = true;
-
-	m_left.reserve(10000);
-	m_right.reserve(10000);
-
-	std::wifstream wfin;
-	wfin.open("words.txt", std::ios_base::in);
-	wchar_t line[500] = {};
-
-	while (!wfin.eof()) {
-		wfin.getline(line, 500);
-		std::wstring word(line);
-		
-		size_t pos = word.find('\t');
-		std::wstring left = word.substr(0, pos);
-		std::wstring right = word.substr(pos + 1, word.size() - pos - 1);
-
-		m_left.push_back(left);
-		m_right.push_back(right);
-	}
-
-	wfin.close();
-
-	wfin.open("words_1.txt", std::ios_base::in);
-	int32u count = 0;
-	int32 stat;
-
-	while (!wfin.eof()) {
-		wfin >> stat;
-		m_statLeft.push_back(stat);
-	}
-
-	wfin.close();
-
-	wfin.open("words_2.txt", std::ios_base::in);
-	count = 0;
-
-	while (!wfin.eof()) {
-		wfin >> stat;
-		m_statRight.push_back(stat);
-	}
-
-	wfin.close();
-
-	while (m_statLeft.size() < m_left.size())
-		m_statLeft.push_back(0);
-
-	while (m_statRight.size() < m_right.size())
-		m_statRight.push_back(0);
-
-	if (m_statLeft.size() > m_left.size()) {
-		m_statLeft.erase(m_statLeft.begin() + m_left.size(), m_statLeft.end());
-		m_statRight.erase(m_statRight.begin() + m_right.size(), m_statRight.end());
-	}
-
-	makePushMas();
-}
-
-void WorstWord::push(int32 no) {
-	for (int i = 0; i < m_statLeft.size(); ++i) {
-		if (m_statLeft[i] == no) 
-			m_pushMas.push_back(i);
-	}
-}
-
-//-----------------------------------------------------------------------------
-void WorstWord::makePushMas(void) {
-	bool addZeros = false;
-	int32 min = 10000;
-	for (int i = 0; i < m_statLeft.size(); ++i) {
-		if (m_statLeft[i] == 0) {
-			addZeros = true;
-			break;
-		} else
-		if (m_statLeft[i] < min) {
-			min = m_statLeft[i];
-		}
-	}
-
-	if (addZeros)
-		push(0);
-	else 
-		push(min);
-
-	m_neutral = 0;
-	m_plus = 0;
-	m_minus = 0;
-	for (int i = 0; i < m_statLeft.size(); ++i) {
-		if (m_statLeft[i] == 0)
-			m_neutral++;
-		else
-		if (m_statLeft[i] < 0)
-			m_minus++;
-		else
-		if (m_statLeft[i] > 0)
-			m_plus++;
-	}
-}
-
-//-----------------------------------------------------------------------------
-WorstWord::~WorstWord() {
-	if (!m_isLeft)
-		swapLanguage();
-
-	std::wofstream fout;
-	fout.open("words_1.txt", std::ios_base::out);
-
-	for (int i = 0; i < m_statLeft.size(); ++i) {
-		fout << m_statLeft[i] << L" ";
-	}
-
-	fout.close();
-
-	fout.open("words_2.txt", std::ios_base::out);
-
-	for (int i = 0; i < m_statRight.size(); ++i) {
-		fout << m_statRight[i] << L" ";
-	}
-
-	fout.close();
-}
-
-//-----------------------------------------------------------------------------
-void WorstWord::getQuestion(std::wstring& question, std::vector<std::wstring>& answers, int32u answersNum) {
+int32u WorstWord::getQuestionPos(void) {
 	if (m_pushMas.size() == 0)
 		makePushMas();
-
-	answers.erase(answers.begin(), answers.end());
-
-	m_number = m_pushMas.back();
+	int32u number = m_pushMas.back();
 	m_pushMas.pop_back();
-	m_answerPos = std::rand() * answersNum / RAND_MAX;
-
-	question = m_left[m_number];
-	for (int i = 0; i < answersNum; ++i) {
-		if (i == m_answerPos)
-			answers.push_back(m_right[m_number]);
-		else
-			answers.push_back(m_right[std::rand() * m_right.size() / RAND_MAX]);
-	}
+	return number;
 }
 
 //-----------------------------------------------------------------------------
-bool WorstWord::answer(int8u answerNo, int8u& correntAnswer) {
-	correntAnswer = m_answerPos;
-	bool returned = answerNo == m_answerPos;
-	if (returned)
-		m_correct++;
-	else
-		m_incorrect++;
-
-	if (returned)
-		if (m_statLeft[m_number] == 0) {
-			m_statLeft[m_number] = 1;
-			m_neutral--;
-			m_plus++;
-		} else
-			if (m_statLeft[m_number] < 0) {
-				m_statLeft[m_number] = 1;
-				m_minus--;
-				m_plus++;
-			} else
-				m_statLeft[m_number]++;
-	else
-		if (m_statLeft[m_number] == 0) {
-			m_statLeft[m_number] = -1;
-			m_neutral--;
-			m_minus++;
-		} else
-			if (m_statLeft[m_number] > 0) {
-				m_statLeft[m_number] = -1;
-				m_plus--;
-				m_minus++;
-			} else
-				m_statLeft[m_number]--;
-
-	return returned;
-}
-
-//-----------------------------------------------------------------------------
-void WorstWord::swapLanguage(void) {
-	m_isLeft = !m_isLeft;
-	swap(m_left, m_right);
-	swap(m_statLeft, m_statRight);
-	m_pushMas.erase(m_pushMas.begin(), m_pushMas.end());
+WorstWord::WorstWord(CommonStatisticData& m) : StatisticGetter(m) {
 	makePushMas();
+}
+
+//-----------------------------------------------------------------------------
+void WorstWord::afterSwap(void) {
+	makePushMas();
+	m_pushMas.erase(m_pushMas.begin(), m_pushMas.end());
 }
 
 //-----------------------------------------------------------------------------
@@ -514,24 +531,51 @@ void WorstWord::draw(ImageBase* buffer) {
 	std::wstringstream sout;
 	img.setTextStyle(TextStyle(14, L"Consolas", TEXT_NONE));
 
-	sout << L"Correct answers: " << m_correct;
+	sout << L"Correct answers: " << m.correct;
 	Point_i pos(Point_i(13, 15));
 	img.setPen(Pen(1, getColorBetween(0.2, Green, Black)));
 	img.drawText(pos, sout.str());
 
 	pos.y += img.getTextSize(sout.str()).y;
 	std::wstringstream sout2;
-	sout2 << L"Incorrect answers: " << m_incorrect;
+	sout2 << L"Incorrect answers: " << m.incorrect;
 	img.setPen(Pen(1, getColorBetween(0.2, Red, Black)));
 	img.drawText(pos, sout2.str());
 
 	pos.y += img.getTextSize(sout.str()).y;
 	std::wstringstream sout3;
-	sout3 << L"Unexplored words: " << m_neutral << std::endl
-		  << L"Mistakes: " << m_minus << std::endl
-		  << L"Correct answers: " << m_plus << std::endl;
+	sout3 << L"Unexplored words: " << m.neutral << std::endl
+		  << L"Mistakes: " << m.minus << std::endl
+		  << L"Correct answers: " << m.plus << std::endl;
 	img.setPen(Pen(1, getGrayHue(0.9)));
 	img.drawText(pos, sout3.str());
+}
+
+//-----------------------------------------------------------------------------
+void WorstWord::push(int32 no) {
+	for (int i = 0; i < m.statLeft.size(); ++i) {
+		if (m.statLeft[i] == no) 
+			m_pushMas.push_back(i);
+	}
+}
+
+//-----------------------------------------------------------------------------
+void WorstWord::makePushMas(void) {
+	bool addZeros = false;
+	int32 min = 10000;
+	for (int i = 0; i < m.statLeft.size(); ++i) {
+		if (m.statLeft[i] == 0) {
+			addZeros = true;
+			break;
+		} else
+		if (m.statLeft[i] < min)
+			min = m.statLeft[i];
+	}
+
+	if (addZeros)
+		push(0);
+	else 
+		push(min);
 }
 
 //-----------------------------------------------------------------------------
@@ -666,6 +710,14 @@ bool ClickHandler::onMessage(int32u messageNo, void* data) {
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
+MainHandler::MainHandler(EventsBase* parent) : 
+	BrainCtrl(parent),
+	m_buttonsCount(4),
+	m_getter(0),
+	m_data() {
+}
+
+//-----------------------------------------------------------------------------
 MainHandler::~MainHandler() {
 	// Вызываются деструкторы режимов
 	for (int i = 0; i < m_getters.size(); ++i) {
@@ -768,28 +820,29 @@ void MainHandler::makeButtons(int32u count) {
 }
 
 //-----------------------------------------------------------------------------
-bool MainHandler::onMessage(int32u messageNo, void* data) {
-	if (!m_isInited && messageNo != MAIN_INIT) 
-		return onMessage(MAIN_INIT, nullptr);
-	if (messageNo == MAIN_INIT) {
-		m_isInited = true;
-		// Создает классы генерации слов
-		m_getter = 1;
-		m_getters.push_back(new RandomWord());
-		m_getters.push_back(new WorstWord());
+void MainHandler::init() {
+	// Создает классы генерации слов
+	m_getter = 1;
+	m_getters.push_back(new RandomWord(m_data));
+	m_getters.push_back(new WorstWord(m_data));
 
-		// Создает клик хандлер
-		m_storage->array.push_back(new ClickHandler(m_storage));
+	// Создает клик хандлер
+	m_storage->array.push_back(new ClickHandler(m_storage));
 
-		// Создает кнопки
-		makeButtons(m_buttonsCount);
+	// Создает кнопки
+	makeButtons(m_buttonsCount);
 
-		// Создает меню
-		m_menu = new StaticMenu(L"=100 Swap language | Word count: 4 > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <", m_storage);
-		m_storage->array.push_back(m_menu);
+	// Создает меню
+	m_menu = new StaticMenu(L"=100 Swap language | =101 Need to learn | Word count: 4 > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <", m_storage);
+	m_storage->array.push_back(m_menu);
 
-		onMessage(CLICK_CLICK, nullptr);
-	} else
+	onMessage(CLICK_CLICK, nullptr);
+
+	m_wnd->worthRedraw();
+}
+
+//-----------------------------------------------------------------------------
+bool MainHandler::onMessageNext(int32u messageNo, void* data) {
 	if (messageNo == CLICK_CLICK) {
 		// Получить следующий вопрос
 		m_getters[m_getter]->getQuestion(m_question, m_answers, m_buttons.size());
@@ -823,6 +876,12 @@ bool MainHandler::onMessage(int32u messageNo, void* data) {
 			onMessage(CLICK_CLICK, nullptr);
 		} else
 
+		// Надо заучить слово
+		if (*((int32u*)data) == 101) {
+			m_getters[m_getter]->needToLearn();
+			onMessage(CLICK_CLICK, nullptr);
+		} else
+
 		// Количество спрашиваемых слов
 		if (*((int32u*)data) == 1) {
 			if (m_buttonsCount < 10) {
@@ -831,7 +890,7 @@ bool MainHandler::onMessage(int32u messageNo, void* data) {
 				onMessage(CLICK_CLICK, nullptr);
 
 				std::wstringstream sout;
-				sout << L"=100 Swap language | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <";
+				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <";
 				m_menu->change(sout.str());
 			}
 		} else
@@ -842,7 +901,7 @@ bool MainHandler::onMessage(int32u messageNo, void* data) {
 				onMessage(CLICK_CLICK, nullptr);
 
 				std::wstringstream sout;
-				sout << L"=100 Swap language | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <";
+				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <";
 				m_menu->change(sout.str());
 			}
 		} else
@@ -891,11 +950,12 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 }
 
 /*
-	[ ] Что происходит когда случайный вариант ответа показывает на текущий  правильный? ответ - говорит что непраивильно. Чтобы не было повторяющихся вариантов ответа
-	[ ] Чтобы в рандомном режиме так же запоминалось как хорошо отвечаю на некоторые вопросы.
+	[x] Что происходит когда случайный вариант ответа показывает на текущий  правильный? ответ - говорит что непраивильно. Чтобы не было повторяющихся вариантов ответа
+	[x] Чтобы в рандомном режиме так же запоминалось как хорошо отвечаю на некоторые вопросы.
 	[ ] Чтобы слова переносились на новую строчку
-	[ ] Чтобы можно было отмечать, какое слово надо заучить (-5)
-	[ ] Чтобы при правильном ответе отрицательные значения увеличивались на +1
+	[x] Чтобы можно было отмечать, какое слово надо заучить (-5)
 	[ ] Чтобы был режим - первые 100 слов, вторые 100 слов и т.д.
-	[ ] Чтобы все классы наследовались от статистического анализатора и в соответствии с этим создавали вопросы и т.д.
+	[x] Чтобы при правильном ответе отрицательные значения увеличивались на +1
+	[x] Чтобы все классы наследовались от статистического анализатора и в соответствии с этим создавали вопросы и т.д.
+	[x] Добавить минимальное количество слов, с которыми программа может работать.
 */

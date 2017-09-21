@@ -1,0 +1,8 @@
+.vs/
+ConEmu.lnk
+ideas.txt
+bin/
+obj/
+libagg.a
+include/agg/
+doc/html/

@@ -382,7 +382,7 @@ void StatisticGetter::getQuestion(std::wstring& question,
 			newGeneration:
 			int32u wrongPos = std::rand() * m.right.size() / RAND_MAX;
 
-			if (wrongPos == m.answerPos)
+			if (wrongPos == m.number)
 				goto newGeneration;
 			for (int i = 0; i < answersPos.size(); ++i)
 				if (wrongPos == answersPos[i])
@@ -833,7 +833,7 @@ void MainHandler::init() {
 	makeButtons(m_buttonsCount);
 
 	// Создает меню
-	m_menu = new StaticMenu(L"=100 Swap language | =101 Need to learn | Word count: 4 > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <", m_storage);
+	m_menu = new StaticMenu(L"=100 Swap language | =101 Need to learn | Word count: 4 > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting <", m_storage);
 	m_storage->array.push_back(m_menu);
 
 	onMessage(CLICK_CLICK, nullptr);
@@ -890,7 +890,7 @@ bool MainHandler::onMessageNext(int32u messageNo, void* data) {
 				onMessage(CLICK_CLICK, nullptr);
 
 				std::wstringstream sout;
-				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <";
+				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting <";
 				m_menu->change(sout.str());
 			}
 		} else
@@ -901,7 +901,7 @@ bool MainHandler::onMessageNext(int32u messageNo, void* data) {
 				onMessage(CLICK_CLICK, nullptr);
 
 				std::wstringstream sout;
-				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting | =5 ~ All words orderly | =6 ~ All words randomly <";
+				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting <";
 				m_menu->change(sout.str());
 			}
 		} else
@@ -958,4 +958,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 	[x] Чтобы при правильном ответе отрицательные значения увеличивались на +1
 	[x] Чтобы все классы наследовались от статистического анализатора и в соответствии с этим создавали вопросы и т.д.
 	[x] Добавить минимальное количество слов, с которыми программа может работать.
+	[ ] чтобы не попадались слова с одинаковыым английским написанием
+	[ ] Рассмотреть падение программы при смене фокуса
+	[ ] Чтобы можно было полистать слова сбоку, почитать, повторить, и показывало какие не изучены, какие правильно отвечены, какие неправильно
 */

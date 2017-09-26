@@ -113,7 +113,7 @@ public:
 
 	int32u getQuestionPos(void);
 	void afterSwap(void);
-	void draw(ImageBase* buffer);
+	void draw(ImageBase* buffer) {}
 };
 
 //-----------------------------------------------------------------------------
@@ -123,7 +123,7 @@ public:
 	WorstWord(CommonStatisticData& m);
 	int32u getQuestionPos(void);
 	void afterSwap(void);
-	void draw(ImageBase* buffer);
+	void draw(ImageBase* buffer) {}
 private:
 	void makePushMas(void);
 	void push(int32 no);
@@ -197,6 +197,22 @@ private:
 };
 
 //-----------------------------------------------------------------------------
+/** Класс, отвечающий за чтение и сохранение настроек в программе. */
+class Settings
+{
+public:
+	void load(Point_i stdPos, Point_i stdSize, bool stdLanguage, bool stdStat, int32u stdGetter, int32u stdButtonCount);
+	void save(Point_i curPos, Point_i curSize, bool curLanguage, bool curSTat, int32u curGetter, int32u curButtonCount);
+
+	Point_i pos;
+	Point_i size;
+	int32u buttonCount;
+	bool isLeftLanguage;
+	bool drawStat;
+	int32u getter;
+};
+
+//-----------------------------------------------------------------------------
 /** Основные мозги программы. Получает все сообщения, обрабатывает их. */
 class MainHandler : public BrainCtrl
 {
@@ -204,10 +220,13 @@ public:
 	MainHandler(EventsBase* parent);
 	~MainHandler();
 
-	//-------------------------------------------------------------------------
 	void init(void);
+	void makeMenu(void);
+
+	//-------------------------------------------------------------------------
 	bool onMessageNext(int32u messageNo, void* data);
 	bool onResize(Rect rect, SizingType type);
+	bool onMove(Point_i newPos);
 	void draw(ImageBase* buffer);
 private:
 	int32u							m_buttonsCount;
@@ -218,13 +237,41 @@ private:
 	std::wstring					m_question;
 	std::vector<std::wstring>		m_answers;
 	CommonStatisticData				m_data;
+	Settings						m_settings;
+	bool							m_isLeft;
+	bool							m_drawStat;
 
 	void makeButtons(int32u count);
 };
 
+//-----------------------------------------------------------------------------
+void writeTextInRectangle(ImageBase* img, std::wstring text, int32u size, Color penClr, Point_i a, Point_i b);
+
 //=============================================================================
 //=============================================================================
 //=============================================================================
+
+//-----------------------------------------------------------------------------
+void writeTextInRectangle(ImageBase* img, std::wstring text, int32u size, Color penClr, Point_i a, Point_i b) {
+	ImageDrawing_win img2(img);
+	img2.setPen(Pen(1, penClr));
+	img2.setTextStyle(TextStyle(size, L"Consolas", TEXT_NONE));
+
+
+	Point_d textSize;
+	textSize = img2.getTextSize(text);
+	if ((textSize.x + 5) > (b - a).x) {
+		text.insert(text.size() / 2, L"-\n");
+		textSize = img2.getTextSize(text);
+	}
+
+	Point_d pos((a + b)/2 - textSize/2);
+	img2.drawText(pos, text);
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
 CommonStatisticData::CommonStatisticData() : 
@@ -241,19 +288,22 @@ CommonStatisticData::CommonStatisticData() :
 	wfin.open(filename, std::ios_base::in);
 	wchar_t buffer[500] = {};
 
-	while (!wfin.eof()) {
-		wfin.getline(buffer, 500);
-		std::wstring word(buffer);
-		
-		size_t pos = word.find('\t');
-		std::wstring rleft = word.substr(0, pos);
-		std::wstring rright = word.substr(pos + 1, word.size() - pos - 1);
+	if (wfin) {
+		while (!wfin.eof()) {
+			wfin.getline(buffer, 500);
+			std::wstring word(buffer);
+			
+			size_t pos = word.find('\t');
+			std::wstring rleft = word.substr(0, pos);
+			std::wstring rright = word.substr(pos + 1, word.size() - pos - 1);
 
-		left.push_back(rleft);
-		right.push_back(rright);
-	}
+			left.push_back(rleft);
+			right.push_back(rright);
+		}
 
-	wfin.close();
+		wfin.close();
+	} else
+		messageBox(L"Words file not exist!!!", L"Words file not exist!!!", MESSAGE_OK);
 
 	// See for too low words
 	if (left.size() < 15) 
@@ -264,23 +314,27 @@ CommonStatisticData::CommonStatisticData() :
 	int32u count = 0;
 	int32 stat;
 
-	while (!wfin.eof()) {
-		wfin >> stat;
-		statLeft.push_back(stat);
-	}
+	if (wfin) {
+		while (!wfin.eof()) {
+			wfin >> stat;
+			statLeft.push_back(stat);
+		}
 
-	wfin.close();
+		wfin.close();
+	}
 
 	// Read second statistic file
 	wfin.open(file2, std::ios_base::in);
 	count = 0;
 
-	while (!wfin.eof()) {
-		wfin >> stat;
-		statRight.push_back(stat);
-	}
+	if (wfin) {
+		while (!wfin.eof()) {
+			wfin >> stat;
+			statRight.push_back(stat);
+		}
 
-	wfin.close();
+		wfin.close();
+	}
 
 	// Align the size of statistic arrays
 	while (statLeft.size() < left.size())
@@ -384,6 +438,8 @@ void StatisticGetter::getQuestion(std::wstring& question,
 
 			if (wrongPos == m.number)
 				goto newGeneration;
+			if (m.left[wrongPos] == m.left[m.number])
+				goto newGeneration;
 			for (int i = 0; i < answersPos.size(); ++i)
 				if (wrongPos == answersPos[i])
 					goto newGeneration;
@@ -472,34 +528,6 @@ void RandomWord::afterSwap(void) {
 }
 
 //-----------------------------------------------------------------------------
-void RandomWord::draw(ImageBase* buffer) {
-	// Пишется например сколько слов угадано, сколько нет, выводится само слово
-	ImageDrawing_win img(buffer);
-
-	std::wstringstream sout;
-	img.setTextStyle(TextStyle(14, L"Consolas", TEXT_NONE));
-
-	sout << L"Correct answers: " << m.correct;
-	Point_i pos(Point_i(13, 15));
-	img.setPen(Pen(1, getColorBetween(0.2, Green, Black)));
-	img.drawText(pos, sout.str());
-
-	pos.y += img.getTextSize(sout.str()).y;
-	std::wstringstream sout2;
-	sout2 << L"Incorrect answers: " << m.incorrect;
-	img.setPen(Pen(1, getColorBetween(0.2, Red, Black)));
-	img.drawText(pos, sout2.str());
-
-	pos.y += img.getTextSize(sout.str()).y;
-	std::wstringstream sout3;
-	sout3 << L"Unexplored words: " << m.neutral << std::endl
-		  << L"Mistakes: " << m.minus << std::endl
-		  << L"Correct answers: " << m.plus << std::endl;
-	img.setPen(Pen(1, getGrayHue(0.9)));
-	img.drawText(pos, sout3.str());
-}
-
-//-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 
@@ -521,34 +549,6 @@ WorstWord::WorstWord(CommonStatisticData& m) : StatisticGetter(m) {
 void WorstWord::afterSwap(void) {
 	makePushMas();
 	m_pushMas.erase(m_pushMas.begin(), m_pushMas.end());
-}
-
-//-----------------------------------------------------------------------------
-void WorstWord::draw(ImageBase* buffer) {
-	// Пишется например сколько слов угадано, сколько нет, выводится само слово
-	ImageDrawing_win img(buffer);
-
-	std::wstringstream sout;
-	img.setTextStyle(TextStyle(14, L"Consolas", TEXT_NONE));
-
-	sout << L"Correct answers: " << m.correct;
-	Point_i pos(Point_i(13, 15));
-	img.setPen(Pen(1, getColorBetween(0.2, Green, Black)));
-	img.drawText(pos, sout.str());
-
-	pos.y += img.getTextSize(sout.str()).y;
-	std::wstringstream sout2;
-	sout2 << L"Incorrect answers: " << m.incorrect;
-	img.setPen(Pen(1, getColorBetween(0.2, Red, Black)));
-	img.drawText(pos, sout2.str());
-
-	pos.y += img.getTextSize(sout.str()).y;
-	std::wstringstream sout3;
-	sout3 << L"Unexplored words: " << m.neutral << std::endl
-		  << L"Mistakes: " << m.minus << std::endl
-		  << L"Correct answers: " << m.plus << std::endl;
-	img.setPen(Pen(1, getGrayHue(0.9)));
-	img.drawText(pos, sout3.str());
 }
 
 //-----------------------------------------------------------------------------
@@ -633,12 +633,7 @@ void WrongRightButton::drawButton(ImageBase* buffer,
 	img.setPen(Pen(0.5, border));
 	img.drawPolyline(poly);
 
-	img.setPen(Pen(1, border));
-	img.setTextStyle(TextStyle(16, L"Consolas", TEXT_NONE));
-	Point_d textSize(img.getTextSize(m_str));
-	//Point_d pos((poly.array[0] + poly.array[2])/2 - Point_i(textSize.x, -textSize.y)/2 - Point_i(0, 3));
-	Point_d pos((poly.array[0] + poly.array[2])/2 - textSize/2);
-	img.drawText(pos, m_str);
+	writeTextInRectangle(buffer, m_str, 16, border, Point_i(rect.ax, rect.ay), Point_i(rect.bx, rect.by));
 }
 
 //-----------------------------------------------------------------------------
@@ -710,11 +705,72 @@ bool ClickHandler::onMessage(int32u messageNo, void* data) {
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
+void Settings::load(Point_i stdPos, Point_i stdSize, bool stdLanguage, bool stdStat, int32u stdGetter, int32u stdButtonCount) {
+	std::wifstream fin;
+
+	fin.open(L"settings.txt");
+
+	if (fin) {
+		fin >> pos.x >> pos.y;
+		fin >> size.x >> size.y;
+		fin >> isLeftLanguage;
+		fin >> drawStat;
+		fin >> getter;
+		fin >> buttonCount;
+
+		fin.close();
+	} else {
+		pos = stdPos;
+		size = stdSize;
+		isLeftLanguage = stdLanguage; 
+		drawStat = stdStat;
+		getter = stdGetter;
+		buttonCount = stdButtonCount;
+	}
+}
+
+//-----------------------------------------------------------------------------
+void Settings::save(Point_i curPos, Point_i curSize, bool curLanguage, bool curStat, int32u curGetter, int32u curButtonCount) {
+	std::wofstream fout;
+
+	fout.open(L"settings.txt");
+	
+	fout << curPos.x << L" " << curPos.y << std::endl;
+	fout << curSize.x << L" " << curSize.y << std::endl;
+	fout << curLanguage << std::endl;
+	fout << curStat << std::endl;
+	fout << curGetter << std::endl;
+	fout << curButtonCount << std::endl;
+
+	fout.close();
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
 MainHandler::MainHandler(EventsBase* parent) : 
 	BrainCtrl(parent),
 	m_buttonsCount(4),
 	m_getter(0),
+	m_isLeft(true),
+	m_drawStat(true),
 	m_data() {
+
+	m_settings.load(m_wnd->getPos(), m_wnd->getWindowSize(), m_isLeft, m_drawStat, m_getter, m_buttonsCount);
+	m_wnd->setPos(m_settings.pos);
+	m_wnd->setWindowSize(m_settings.size);
+	m_isLeft = m_settings.isLeftLanguage;
+	m_drawStat = m_settings.drawStat;
+	m_getter = m_settings.getter;
+	m_buttonsCount = m_settings.buttonCount;
+
+	if (m_getter > 1) m_getter = 1;
+	if (m_getter < 0) m_getter = 0;
+
+	if (m_buttonsCount > 10) m_buttonsCount = 10;
+	if (m_buttonsCount < 1) m_buttonsCount = 1;
 }
 
 //-----------------------------------------------------------------------------
@@ -723,6 +779,8 @@ MainHandler::~MainHandler() {
 	for (int i = 0; i < m_getters.size(); ++i) {
 		delete m_getters[i];
 	}
+
+	m_settings.save(m_settings.pos, m_settings.size, m_isLeft, m_drawStat, m_getter, m_buttonsCount);
 }
 
 //-----------------------------------------------------------------------------
@@ -737,7 +795,16 @@ bool MainHandler::onResize(Rect rect, SizingType type) {
 			Point_i(buttonPadding, yOffset + buttonPadding*i + ySize*i), 
 			Point_i(size.x - buttonPadding, yOffset + buttonPadding*i + ySize*(i + 1)));
 	}
+
+	m_settings.size = Point_i(rect.x(), rect.y());
+
 	return true; 
+}
+
+//-----------------------------------------------------------------------------
+bool MainHandler::onMove(Point_i newPos) {
+	m_settings.pos = newPos;
+	return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -747,28 +814,57 @@ void MainHandler::draw(ImageBase* buffer) {
 	Point_i size = m_wnd->getClientSize();
 	int32u yOffset = 100;
 	int32u buttonPadding = 10;
-	int32u dataSize = 170;
+	int32u dataSize = 0;
 
-	Rect rect1(buttonPadding, buttonPadding, buttonPadding + dataSize, yOffset - buttonPadding);
+	if (m_drawStat) {
+		dataSize = 170;
 
-	for (int32 j = rect1.ay; j < rect1.by; ++j) {
-		Color clr = getColorBetween(double(j-rect1.ay)/rect1.y(), 
-			Gray,
-			White);
-		for (int32 i = rect1.ax; i < rect1.bx; ++i)
-			img.getPixel(Point_i(i, j)) = clr;
+		Rect rect1(buttonPadding, buttonPadding, buttonPadding + dataSize, yOffset - buttonPadding);
+
+		for (int32 j = rect1.ay; j < rect1.by; ++j) {
+			Color clr = getColorBetween(double(j-rect1.ay)/rect1.y(), 
+				Gray,
+				White);
+			for (int32 i = rect1.ax; i < rect1.bx; ++i)
+				img.getPixel(Point_i(i, j)) = clr;
+		}
+
+		Polygon_d poly1;
+		poly1.array.push_back(Point_d(rect1.ax, rect1.ay));
+		poly1.array.push_back(Point_d(rect1.bx, rect1.ay));
+		poly1.array.push_back(Point_d(rect1.bx, rect1.by));
+		poly1.array.push_back(Point_d(rect1.ax, rect1.by));
+
+		img.setPen(Pen(0.5, Black));
+		img.drawPolyline(poly1);
+
+		// Пишется например сколько слов угадано, сколько нет, выводится само слово
+		std::wstringstream sout;
+		img.setTextStyle(TextStyle(14, L"Consolas", TEXT_NONE));
+
+		sout << L"Correct answers: " << m_data.correct;
+		Point_i pos(Point_i(13, 15));
+		img.setPen(Pen(1, getColorBetween(0.2, Green, Black)));
+		img.drawText(pos, sout.str());
+
+		pos.y += img.getTextSize(sout.str()).y;
+		std::wstringstream sout2;
+		sout2 << L"Incorrect answers: " << m_data.incorrect;
+		img.setPen(Pen(1, getColorBetween(0.2, Red, Black)));
+		img.drawText(pos, sout2.str());
+
+		pos.y += img.getTextSize(sout.str()).y;
+		std::wstringstream sout3;
+		sout3 << L"Unexplored words: " << m_data.neutral << std::endl
+			<< L"Mistakes: " << m_data.minus << std::endl
+			<< L"Correct answers: " << m_data.plus << std::endl;
+		img.setPen(Pen(1, getGrayHue(0.9)));
+		img.drawText(pos, sout3.str());
+
+		dataSize += buttonPadding;
 	}
 
-	Polygon_d poly1;
-	poly1.array.push_back(Point_d(rect1.ax, rect1.ay));
-	poly1.array.push_back(Point_d(rect1.bx, rect1.ay));
-	poly1.array.push_back(Point_d(rect1.bx, rect1.by));
-	poly1.array.push_back(Point_d(rect1.ax, rect1.by));
-
-	img.setPen(Pen(0.5, Black));
-	img.drawPolyline(poly1);
-
-	Rect rect(dataSize + buttonPadding*2, buttonPadding, size.x - buttonPadding, yOffset - buttonPadding);
+	Rect rect(dataSize + buttonPadding, buttonPadding, size.x - buttonPadding, yOffset - buttonPadding);
 
 	for (int32 j = rect.ay; j < rect.by; ++j) {
 		Color clr = getColorBetween(double(j-rect.ay)/rect.y(), 
@@ -787,11 +883,7 @@ void MainHandler::draw(ImageBase* buffer) {
 	img.setPen(Pen(0.5, Black));
 	img.drawPolyline(poly);
 
-	img.setPen(Pen(1, White));
-	img.setTextStyle(TextStyle(24, L"Consolas", TEXT_NONE));
-	Point_d textSize(img.getTextSize(m_question));
-	Point_d pos((poly.array[0] + poly.array[2])/2 - textSize/2);
-	img.drawText(pos, m_question);
+	writeTextInRectangle(buffer, m_question, 24, White, Point_i(rect.ax, rect.ay), Point_i(rect.bx, rect.by));
 
 	// Рисуются всякие косметические вещи
 	m_getters[m_getter]->draw(buffer);
@@ -820,7 +912,21 @@ void MainHandler::makeButtons(int32u count) {
 }
 
 //-----------------------------------------------------------------------------
-void MainHandler::init() {
+void MainHandler::makeMenu(void) {
+	std::wstringstream sout;
+	sout << L"=100 Swap language | =101 Need to learn | =102 ";
+	if (m_drawStat) 
+		sout << L"Disable";
+	else
+		sout << L"Enable";
+	sout << L" statistic | Word count: ";
+	sout << m_buttonsCount;
+	sout << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting <";
+	m_menu->change(sout.str());
+}
+
+//-----------------------------------------------------------------------------
+void MainHandler::init(void) {
 	// Создает классы генерации слов
 	m_getter = 1;
 	m_getters.push_back(new RandomWord(m_data));
@@ -833,7 +939,8 @@ void MainHandler::init() {
 	makeButtons(m_buttonsCount);
 
 	// Создает меню
-	m_menu = new StaticMenu(L"=100 Swap language | =101 Need to learn | Word count: 4 > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting <", m_storage);
+	m_menu = new StaticMenu(L" a ", m_storage);
+	makeMenu();
 	m_storage->array.push_back(m_menu);
 
 	onMessage(CLICK_CLICK, nullptr);
@@ -873,6 +980,7 @@ bool MainHandler::onMessageNext(int32u messageNo, void* data) {
 		// Порядок языка
 		if (*((int32u*)data) == 100) {
 			m_getters[m_getter]->swapLanguage();
+			m_isLeft = !m_isLeft;
 			onMessage(CLICK_CLICK, nullptr);
 		} else
 
@@ -882,16 +990,19 @@ bool MainHandler::onMessageNext(int32u messageNo, void* data) {
 			onMessage(CLICK_CLICK, nullptr);
 		} else
 
+		// Скрыть\показать статистику
+		if (*((int32u*)data) == 102) {
+			m_drawStat = !m_drawStat;
+			makeMenu();
+		} else
+
 		// Количество спрашиваемых слов
 		if (*((int32u*)data) == 1) {
 			if (m_buttonsCount < 10) {
 				m_buttonsCount++;
 				makeButtons(m_buttonsCount);
 				onMessage(CLICK_CLICK, nullptr);
-
-				std::wstringstream sout;
-				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting <";
-				m_menu->change(sout.str());
+				makeMenu();
 			}
 		} else
 		if (*((int32u*)data) == 2) {
@@ -899,10 +1010,7 @@ bool MainHandler::onMessageNext(int32u messageNo, void* data) {
 				m_buttonsCount--;
 				makeButtons(m_buttonsCount);
 				onMessage(CLICK_CLICK, nullptr);
-
-				std::wstringstream sout;
-				sout << L"=100 Swap language | =101 Need to learn | Word count: " << m_buttonsCount << L" > =1 Count++ | =2 Count-- < Regime > =3 Random | =4 Adjusting <";
-				m_menu->change(sout.str());
+				makeMenu();
 			}
 		} else
 
@@ -952,18 +1060,19 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 /*
 	[x] Что происходит когда случайный вариант ответа показывает на текущий  правильный? ответ - говорит что непраивильно. Чтобы не было повторяющихся вариантов ответа
 	[x] Чтобы в рандомном режиме так же запоминалось как хорошо отвечаю на некоторые вопросы.
-	[ ] Чтобы слова переносились на новую строчку
 	[x] Чтобы можно было отмечать, какое слово надо заучить (-5)
-	[ ] Чтобы был режим - первые 100 слов, вторые 100 слов и т.д.
 	[x] Чтобы при правильном ответе отрицательные значения увеличивались на +1
 	[x] Чтобы все классы наследовались от статистического анализатора и в соответствии с этим создавали вопросы и т.д.
 	[x] Добавить минимальное количество слов, с которыми программа может работать.
-	[ ] чтобы не попадались слова с одинаковыым английским написанием
+	[x] Чтобы в кнопке переносилось на новую строчку
+	[x] чтобы не попадались слова с одинаковыым английским написанием
 	[ ] Рассмотреть падение программы при смене фокуса
 	[ ] Чтобы можно было полистать слова сбоку, почитать, повторить, и показывало какие не изучены, какие правильно отвечены, какие неправильно.
 	[ ] Чтобы была статистика:
 		Сколько всего было ответов, среднее значение знания слов
 		Сколько всего было правильных и неправильных
-	[ ] Чтобы запоминалось сколько кнопок, размер экрана, текущий язык
-	[ ] Файлы words_1.txt _2 создаются автоматически, если их нет. Если нет файла words.txt, то это пишется в мессадж боксе.
+	[x] Чтобы запоминалось сколько кнопок, размер экрана, текущий язык
+	[x] Файлы words_1.txt _2 создаются автоматически, если их нет. Если нет файла words.txt, то это пишется в мессадж боксе.
+	[x] Создать отдельную программку для того, чтобы наполнять файл words случайными словами из отдельного словаря.
+	[x] Чтобы можно было отключить счетчик изученных слов
 */
